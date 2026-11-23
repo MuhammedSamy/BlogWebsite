@@ -16,7 +16,7 @@ app.set('view engine', 'ejs');
 app.use(bodyParser.urlencoded({extended: true}));
 app.use(express.static("public"));
 
-mongoose.connect("mongodb://localhost:27017/blogDB", {useNewUrlParser: true,useUnifiedTopology: true });
+const databaseUri = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/blogDB";
 
 const postSchema = {
   title: String,
@@ -25,9 +25,10 @@ const postSchema = {
 
 const Post = mongoose.model("Post", postSchema);
 
-app.get("/", function(req, res){
+app.get("/", function(req, res, next){
 
   Post.find({}, function(err, posts){
+    if (err) return next(err);
     res.render("home", {
       startingContent: homeStartingContent,
       posts: posts
@@ -39,31 +40,27 @@ app.get("/compose", function(req, res){
   res.render("compose");
 });
 
-app.post("/compose", function(req, res){
-  const post = new Post({
-    title: req.body.postTitle,
-    content: req.body.postBody
-  });
-
-
+app.post("/compose", function(req, res, next){
+  const {postTitle, postBody} = req.body;
+  if (typeof postTitle !== "string" || typeof postBody !== "string") {
+    return res.status(400).send("Title and content must be text");
+  }
+  const post = new Post({title: postTitle, content: postBody});
   post.save(function(err){
-    if (!err){
-        res.redirect("/");
-    }
+    if (err) return next(err);
+    res.redirect("/");
   });
 });
 
-app.get("/posts/:postId", function(req, res){
-
-const requestedPostId = req.params.postId;
-
-  Post.findOne({_id: requestedPostId}, function(err, post){
-    res.render("post", {
-      title: post.title,
-      content: post.content
-    });
+app.get("/posts/:postId", function(req, res, next){
+  if (!mongoose.isObjectIdOrHexString(req.params.postId)) {
+    return res.status(400).send("Invalid post ID");
+  }
+  Post.findById(req.params.postId, function(err, post){
+    if (err) return next(err);
+    if (!post) return res.sendStatus(404);
+    res.render("post", {title: post.title, content: post.content});
   });
-
 });
 
 app.get("/about", function(req, res){
@@ -74,7 +71,9 @@ app.get("/contact", function(req, res){
   res.render("contact", {contactContent: contactContent});
 });
 
-
-app.listen(3000, function() {
-  console.log("Server started on port 3000");
-});
+mongoose.connect(databaseUri)
+  .then(() => app.listen(process.env.PORT || 3000, () => console.log("Server started successfully")))
+  .catch(err => {
+    console.error("MongoDB connection failed", err.name);
+    process.exitCode = 1;
+  });
